@@ -5,7 +5,7 @@ import streamlit as st
 from streamlit_mic_recorder import mic_recorder
 from python_speech_features import mfcc, delta
 from scipy.signal import resample
-import soundfile as sf
+import librosa
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -47,8 +47,10 @@ if audio_bytes is not None:
 
     st.audio("temp_audio.wav", format="audio/wav")
 
-    # Load audio (support wav/mp3)
-    y, sr = sf.read("temp_audio.wav")
+    
+    
+    # baca audio pakai librosa (aman di cloud)
+    y, sr = librosa.load("temp_audio.wav", sr=None, mono=True)
 
     # Convert stereo → mono jika perlu
     if len(y.shape) > 1:
