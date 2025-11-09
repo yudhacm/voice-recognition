@@ -88,6 +88,7 @@ if audio_bytes:
     m = mfcc(y, 16000, numcep=13)
     feat = np.mean(m, axis=0).reshape(1, -1)
 
+    feat = scaler.transform(feat)
 
     # ========== PREDIKSI ==========
     prob = model.predict_proba(feat)[0]
