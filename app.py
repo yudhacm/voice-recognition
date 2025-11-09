@@ -2,34 +2,34 @@ import streamlit as st
 import numpy as np
 import librosa
 import joblib
-from audiorecorder import audiorecorder
+from streamlit_mic_recorder import mic_recorder
+import soundfile as sf
 
-# ================= MODEL LOAD =================
+# ===== LOAD MODEL =====
 model = joblib.load("models/voice_model.pkl")
 scaler = joblib.load("models/voice_scaler.pkl")
 le = joblib.load("models/label_encoder.pkl")
 
 SR = 16000
 SAMPLES = SR * 1
-THRESHOLD = 60  # lebih fleksibel
+THRESHOLD = 60  # confidence minimal diterima
 
 st.set_page_config(page_title="Voice Recognition", layout="centered")
 st.title("🎤 Voice Recognition (Buka / Tutup - 2 Orang)")
 
-st.write("Klik tombol untuk mulai merekam suara:")
+st.write("Klik tombol mic di bawah untuk merekam suara:")
 
-# ================= RECORDING UI =================
-audio = audiorecorder("🎤 Rekam Suara", "⏹ Stop Rekaman")
+# ===== Recorder dari browser (Cloud-safe) =====
+audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
 
-if len(audio) > 0:
-    st.audio(audio.export().read(), format="audio/wav")
+if audio:
+    # simpan file sementara
+    sf.write("temp.wav", audio['bytes'], samplerate=audio['sample_rate'])
 
-    with open("mic_temp.wav", "wb") as f:
-        f.write(audio.export().read())
+    st.audio("temp.wav", format="audio/wav")
 
-    # Extract MFCC
-    y, _ = librosa.load("mic_temp.wav", sr=SR)
-
+    # load audio
+    y, _ = librosa.load("temp.wav", sr=SR)
     if len(y) > SAMPLES:
         y = y[:SAMPLES]
     else:
@@ -37,10 +37,10 @@ if len(audio) > 0:
 
     mfcc = librosa.feature.mfcc(y=y, sr=SR, n_mfcc=13)
     feat = np.mean(mfcc.T, axis=0)
-    feat_scaled = scaler.transform([feat])
+    feat = scaler.transform([feat])
 
-    prob = model.predict_proba(feat_scaled)[0]
-    pred = model.predict(feat_scaled)[0]
+    prob = model.predict_proba(feat)[0]
+    pred = model.predict(feat)[0]
 
     label = le.inverse_transform([pred])[0]
     confidence = max(prob) * 100
