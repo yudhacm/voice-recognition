@@ -85,13 +85,9 @@ if audio_bytes:
     else:
         y = np.pad(y, (0, 16000 - len(y)))
 
-    # ========== EKSTRAKSI MFCC ==========
     m = mfcc(y, 16000, numcep=13)
-    d1 = delta(m, 2)
-    d2 = delta(d1, 2)
-    feat = np.hstack([m, d1, d2])
-    feat = np.mean(feat, axis=0).reshape(1, -1)
-    feat = scaler.transform(feat)
+    feat = np.mean(m, axis=0).reshape(1, -1)
+
 
     # ========== PREDIKSI ==========
     prob = model.predict_proba(feat)[0]
