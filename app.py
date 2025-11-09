@@ -4,6 +4,7 @@ import librosa
 import joblib
 from streamlit_mic_recorder import mic_recorder
 import soundfile as sf
+import io
 
 # ===== LOAD MODEL =====
 model = joblib.load("models/voice_model.pkl")
