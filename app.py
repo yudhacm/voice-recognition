@@ -3,8 +3,9 @@ import numpy as np
 import joblib
 import streamlit as st
 from streamlit_mic_recorder import mic_recorder
-from python_speech_features import mfcc
+from python_speech_features import mfcc, delta
 from scipy.signal import resample
+import soundfile as sf
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -18,62 +19,87 @@ def load_model():
 model, scaler, le = load_model()
 
 st.title("🎤 Voice Command Recognition")
-st.write("Ucapkan **buka** atau **tutup**")
+st.write("Ucapkan atau upload suara **buka** atau **tutup**")
 
-audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
+# ================= PILIH MODE INPUT =================
+mode = st.radio("Pilih Mode Input Suara:", ["Rekam Langsung 🎙", "Upload File 📁"])
 
-if audio and "bytes" in audio:
+audio_bytes = None
 
-    raw_audio = audio["bytes"]
+# =============== MODE 1: REKAM LANGSUNG ===============
+if mode == "Rekam Langsung 🎙":
+    audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
+    if audio and "bytes" in audio:
+        audio_bytes = audio["bytes"]
 
-    # === 1. Simpan sebagai WAV valid (dengan header) ===
-    with open("recorded.wav", "wb") as f:
-        f.write(raw_audio)
+# =============== MODE 2: UPLOAD FILE ===============
+else:
+    uploaded_file = st.file_uploader("Upload file audio", type=["wav", "mp3", "ogg"])
+    if uploaded_file:
+        audio_bytes = uploaded_file.read()
 
-    # === 2. Putar audio (sekarang pasti jalan) ===
-    st.audio("recorded.wav", format="audio/wav")
+# =============== PROSES PREDIKSI ===============
+if audio_bytes is not None:
 
-    # === 3. Convert byte ke numpy int16 ===
-    samples = np.frombuffer(raw_audio, dtype=np.int16)
+    # Simpan sementara agar bisa diputar
+    with open("temp_audio.wav", "wb") as f:
+        f.write(audio_bytes)
 
-    # === 4. Jika stereo → convert ke mono ===
-    if samples.ndim > 1 or len(samples.shape) == 1 and len(samples) % 2 == 0:
-        samples = samples.reshape(-1, 2).mean(axis=1).astype(np.int16)
+    st.audio("temp_audio.wav", format="audio/wav")
 
-    # === 5. Normalisasi ===
-    samples = samples.astype(np.float32)
-    samples /= np.max(np.abs(samples)) + 1e-9
+    # Load audio (support wav/mp3)
+    y, sr = sf.read("temp_audio.wav")
 
-    # === 6. Resample 44.1kHz → 16kHz (model kamu pakai 16kHz) ===
-    target_len = int(len(samples) * 16000 / 44100)
-    samples = resample(samples, target_len)
+    # Convert stereo → mono jika perlu
+    if len(y.shape) > 1:
+        y = y.mean(axis=1)
 
-    # === 7. Pastikan 1 detik (16000 sample) ===
-    if len(samples) > 16000:
-        samples = samples[:16000]
+    y = y.astype(np.float32)
+
+    # Normalize volume (RMS)
+    rms = np.sqrt(np.mean(y**2))
+    if rms > 0:
+        y = y / rms * 0.1
+
+    # Resample ke 16kHz
+    if sr != 16000:
+        y = resample(y, int(len(y) * 16000 / sr))
+        sr = 16000
+
+    # Trim silence
+    idx = np.where(np.abs(y) > 0.02)[0]
+    if len(idx) > 0:
+        y = y[idx[0]:idx[-1]]
+
+    # Fix 1 detik
+    if len(y) > 16000:
+        y = y[:16000]
     else:
-        samples = np.pad(samples, (0, 16000 - len(samples)))
+        y = np.pad(y, (0, 16000 - len(y)))
 
-    # === 8. Ekstraksi MFCC ===
-    feat = mfcc(samples, samplerate=16000, numcep=13)
+    # MFCC + Delta + Delta2
+    m = mfcc(y, 16000, numcep=13)
+    d1 = delta(m, 2)
+    d2 = delta(d1, 2)
+    feat = np.hstack([m, d1, d2])
     feat = np.mean(feat, axis=0).reshape(1, -1)
     feat = scaler.transform(feat)
 
-    # === 9. Prediksi ===
+    # Prediksi
     prob = model.predict_proba(feat)[0]
     pred = model.predict(feat)[0]
     label = le.inverse_transform([pred])[0]
-    confidence = max(prob) * 100
+    conf = max(prob) * 100
 
-    # === 10. Output ke UI ===
+    # Output UI
     st.subheader("🔍 Hasil Prediksi")
 
-    if confidence > 70:
+    if conf > 55:
         if "buka" in label.lower():
-            st.success(f"✅ BUKA — Keyakinan {confidence:.2f}%")
+            st.success(f"✅ BUKA — {conf:.2f}%")
         elif "tutup" in label.lower():
-            st.error(f"🔒 TUTUP — Keyakinan {confidence:.2f}%")
+            st.error(f"🔒 TUTUP — {conf:.2f}%")
         else:
-            st.info(f"🔎 {label} — {confidence:.2f}%")
+            st.info(f"🎯 {label} — {conf:.2f}%")
     else:
-        st.warning(f"⚠ Tidak dikenali ({confidence:.2f}%)")
+        st.warning(f"⚠ Tidak dikenali ({conf:.2f}%)")
