@@ -1,6 +1,7 @@
 streamlit
 streamlit-mic-recorder
+numpy
 scipy
 python_speech_features
-numpy
 scikit-learn
+joblib
