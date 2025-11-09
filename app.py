@@ -19,29 +19,41 @@ st.title("🎤 Voice Recognition (Buka / Tutup - 2 Orang)")
 
 st.write("Klik tombol mic di bawah untuk merekam suara:")
 
-# ===== Recorder dari browser (Cloud-safe) =====
 audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
 
 if audio:
-    # simpan file sementara
-    sf.write("temp.wav", audio['bytes'], samplerate=audio['sample_rate'])
+    # Convert bytes menjadi file WAV
+    audio_bytes = audio["bytes"]
+    audio_io = io.BytesIO(audio_bytes)
 
-    st.audio("temp.wav", format="audio/wav")
+    # Baca langsung pakai soundfile
+    y, sr = sf.read(audio_io)
 
-    # load audio
-    y, _ = librosa.load("temp.wav", sr=SR)
+    # Jika stereo, convert ke mono
+    if len(y.shape) > 1:
+        y = y[:, 0]
+
+    # Resample jika perlu
+    if sr != SR:
+        y = librosa.resample(y, orig_sr=sr, target_sr=SR)
+
+    # Normalisasi panjang
     if len(y) > SAMPLES:
         y = y[:SAMPLES]
     else:
         y = np.pad(y, (0, SAMPLES - len(y)))
 
+    # Simpan sementara agar bisa dimainkan di UI
+    sf.write("temp.wav", y, SR)
+    st.audio("temp.wav", format="audio/wav")
+
+    # ===== EKSTRAKSI FITUR & PREDIKSI =====
     mfcc = librosa.feature.mfcc(y=y, sr=SR, n_mfcc=13)
     feat = np.mean(mfcc.T, axis=0)
     feat = scaler.transform([feat])
 
     prob = model.predict_proba(feat)[0]
     pred = model.predict(feat)[0]
-
     label = le.inverse_transform([pred])[0]
     confidence = max(prob) * 100
 
