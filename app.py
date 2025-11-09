@@ -1,59 +1,75 @@
 import streamlit as st
-import numpy as np
-import librosa
 import joblib
+import numpy as np
+import wave
 from streamlit_mic_recorder import mic_recorder
-import soundfile as sf
-import io
+from scipy.io import wavfile
+from python_speech_features import mfcc
 
-# ===== LOAD MODEL =====
-model = joblib.load("models/voice_model.pkl")
-scaler = joblib.load("models/voice_scaler.pkl")
-le = joblib.load("models/label_encoder.pkl")
+# ================== LOAD MODEL ==================
+@st.cache_resource
+def load_model():
+    model = joblib.load("voice_model.pkl")
+    scaler = joblib.load("voice_scaler.pkl")
+    le = joblib.load("label_encoder.pkl")
+    return model, scaler, le
 
-SR = 16000
-SAMPLES = SR * 1
-THRESHOLD = 60  # confidence minimal diterima
+model, scaler, le = load_model()
 
-st.set_page_config(page_title="Voice Recognition", layout="centered")
-st.title("🎤 Voice Recognition (Buka / Tutup - 2 Orang)")
+# ================== UI HEADER ==================
+st.title("🎤 Voice Command Recognition")
+st.write("Ucapkan **buka** atau **tutup**")
 
-st.write("Klik tombol mic di bawah untuk merekam suara:")
-
+# ================== MIC RECORD ==================
 audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
 
 if audio and "bytes" in audio:
-    # 1. Simpan bytes ke file wav
-    with open("temp.wav", "wb") as f:
-        f.write(audio["bytes"])
 
-    # 2. Load pakai librosa
-    y, sr = librosa.load("temp.wav", sr=16000)
+    # --- 1. SAVE AUDIO BYTE TO WAV ---
+    with wave.open("temp.wav", "wb") as wf:
+        wf.setnchannels(1)                # mono
+        wf.setsampwidth(2)                # 16 bit
+        wf.setframerate(16000)            # 16 kHz
+        wf.writeframes(audio["bytes"])
 
-    # 3. Pastikan panjang 1 detik
+    # --- 2. LOAD WAV USING SCIPY ---
+    sr, y = wavfile.read("temp.wav")
+    y = y.astype(np.float32)
+
+    # --- 3. NORMALIZE ---
+    if np.max(np.abs(y)) > 0:
+        y = y / np.max(np.abs(y))
+
+    # --- 4. FORCE 1 SECOND (16000 samples) ---
     SAMPLES = 16000
     if len(y) > SAMPLES:
         y = y[:SAMPLES]
     else:
         y = np.pad(y, (0, SAMPLES - len(y)))
 
-    # 4. Tampilkan audio di UI
+    # --- 5. PLAY AUDIO UI ---
     st.audio("temp.wav", format="audio/wav")
 
-    # 5. Ekstraksi MFCC
-    mfcc = librosa.feature.mfcc(y=y, sr=16000, n_mfcc=13)
-    feat = np.mean(mfcc.T, axis=0)
-    feat = scaler.transform([feat])
+    # --- 6. EXTRACT MFCC (No librosa) ---
+    feat = mfcc(y, samplerate=16000, numcep=13)
+    feat = np.mean(feat, axis=0).reshape(1, -1)
+    feat = scaler.transform(feat)
 
-    # 6. Prediksi
+    # --- 7. PREDICTION ---
     prob = model.predict_proba(feat)[0]
     pred = model.predict(feat)[0]
     label = le.inverse_transform([pred])[0]
-    confidence = max(prob) * 100
+    conf = max(prob) * 100
 
-    # 7. Output hasil
+    # --- 8. RESULT OUTPUT ---
     st.subheader("🔍 Hasil Prediksi")
-    if confidence >= THRESHOLD:
-        st.success(f"✅ {label} ({confidence:.2f}%)")
+
+    if conf >= 70:
+        if "buka" in label.lower():
+            st.success(f"✅ Terdeteksi **BUKA** ({conf:.2f}%)")
+        elif "tutup" in label.lower():
+            st.warning(f"🔒 Terdeteksi **TUTUP** ({conf:.2f}%)")
+        else:
+            st.success(f"✅ {label} ({conf:.2f}%)")
     else:
-        st.error(f"⛔ Suara tidak dikenali ({confidence:.2f}%)")
+        st.error(f"⛔ Suara tidak dikenali ({conf:.2f}%)")
