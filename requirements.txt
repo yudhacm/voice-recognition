@@ -4,4 +4,4 @@ numpy
 scikit-learn
 joblib
 soundfile
-streamlit-audiorecorder
+streamlit-mic-recorder
