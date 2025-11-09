@@ -1,13 +1,12 @@
-import os  # ✅ harus ada
-BASE_DIR = os.path.dirname(__file__)  # ✅ harus ada
-
-import streamlit as st
-import joblib
+import os
 import numpy as np
-import wave
+import joblib
+import streamlit as st
 from streamlit_mic_recorder import mic_recorder
-from scipy.io import wavfile
 from python_speech_features import mfcc
+from scipy.signal import resample
+
+BASE_DIR = os.path.dirname(__file__)
 
 @st.cache_resource
 def load_model():
@@ -25,43 +24,56 @@ audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Reka
 
 if audio and "bytes" in audio:
 
-    with wave.open("temp.wav", "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(16000)
-        wf.writeframes(audio["bytes"])
+    raw_audio = audio["bytes"]
 
-    sr, y = wavfile.read("temp.wav")
-    y = y.astype(np.float32)
+    # === 1. Simpan sebagai WAV valid (dengan header) ===
+    with open("recorded.wav", "wb") as f:
+        f.write(raw_audio)
 
-    if np.max(np.abs(y)) > 0:
-        y = y / np.max(np.abs(y))
+    # === 2. Putar audio (sekarang pasti jalan) ===
+    st.audio("recorded.wav", format="audio/wav")
 
-    SAMPLES = 16000
-    if len(y) > SAMPLES:
-        y = y[:SAMPLES]
+    # === 3. Convert byte ke numpy int16 ===
+    samples = np.frombuffer(raw_audio, dtype=np.int16)
+
+    # === 4. Jika stereo → convert ke mono ===
+    if samples.ndim > 1 or len(samples.shape) == 1 and len(samples) % 2 == 0:
+        samples = samples.reshape(-1, 2).mean(axis=1).astype(np.int16)
+
+    # === 5. Normalisasi ===
+    samples = samples.astype(np.float32)
+    samples /= np.max(np.abs(samples)) + 1e-9
+
+    # === 6. Resample 44.1kHz → 16kHz (model kamu pakai 16kHz) ===
+    target_len = int(len(samples) * 16000 / 44100)
+    samples = resample(samples, target_len)
+
+    # === 7. Pastikan 1 detik (16000 sample) ===
+    if len(samples) > 16000:
+        samples = samples[:16000]
     else:
-        y = np.pad(y, (0, SAMPLES - len(y)))
+        samples = np.pad(samples, (0, 16000 - len(samples)))
 
-    st.audio("temp.wav", format="audio/wav")
-
-    feat = mfcc(y, samplerate=16000, numcep=13)
+    # === 8. Ekstraksi MFCC ===
+    feat = mfcc(samples, samplerate=16000, numcep=13)
     feat = np.mean(feat, axis=0).reshape(1, -1)
     feat = scaler.transform(feat)
 
+    # === 9. Prediksi ===
     prob = model.predict_proba(feat)[0]
     pred = model.predict(feat)[0]
     label = le.inverse_transform([pred])[0]
-    conf = max(prob) * 100
+    confidence = max(prob) * 100
 
+    # === 10. Output ke UI ===
     st.subheader("🔍 Hasil Prediksi")
 
-    if conf >= 70:
+    if confidence > 70:
         if "buka" in label.lower():
-            st.success(f"✅ Terdeteksi **BUKA** ({conf:.2f}%)")
+            st.success(f"✅ BUKA — Keyakinan {confidence:.2f}%")
         elif "tutup" in label.lower():
-            st.warning(f"🔒 Terdeteksi **TUTUP** ({conf:.2f}%)")
+            st.error(f"🔒 TUTUP — Keyakinan {confidence:.2f}%")
         else:
-            st.success(f"✅ {label} ({conf:.2f}%)")
+            st.info(f"🔎 {label} — {confidence:.2f}%")
     else:
-        st.error(f"⛔ Suara tidak dikenali ({conf:.2f}%)")
+        st.warning(f"⚠ Tidak dikenali ({confidence:.2f}%)")
