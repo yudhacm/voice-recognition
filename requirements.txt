@@ -6,3 +6,4 @@ python_speech_features
 scikit-learn
 joblib
 soundfile
+librosa
