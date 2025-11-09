@@ -6,12 +6,11 @@ from streamlit_mic_recorder import mic_recorder
 from scipy.io import wavfile
 from python_speech_features import mfcc
 
-# ================== LOAD MODEL ==================
 @st.cache_resource
 def load_model():
-    model = joblib.load("voice_model.pkl")
-    scaler = joblib.load("voice_scaler.pkl")
-    le = joblib.load("label_encoder.pkl")
+    model = joblib.load(os.path.join(BASE_DIR, "models/voice_model.pkl"))
+    scaler = joblib.load(os.path.join(BASE_DIR, "models/voice_scaler.pkl"))
+    le = joblib.load(os.path.join(BASE_DIR, "models/label_encoder.pkl"))
     return model, scaler, le
 
 model, scaler, le = load_model()
