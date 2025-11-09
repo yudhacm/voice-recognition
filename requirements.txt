@@ -1,7 +1,6 @@
 streamlit
-librosa
+streamlit-mic-recorder
+scipy
+python_speech_features
 numpy
 scikit-learn
-joblib
-soundfile
-streamlit-mic-recorder
