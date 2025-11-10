@@ -95,7 +95,6 @@ if audio_bytes:
 
     # ========== TAMPILKAN HASIL ==========
     st.subheader("🔍 Hasil Prediksi")
-    st.write(f"🧾 Label Terbaca : **{label}**")
     st.write(f"📊 Confidence : **{conf:.2f}%**")
 
     if conf > 55:
