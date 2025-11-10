@@ -2,9 +2,10 @@ import os
 import numpy as np
 import joblib
 import streamlit as st
+from streamlit_mic_recorder import mic_recorder
 from python_speech_features import mfcc
 from scipy.signal import resample
-from scipy.io import wavfile
+from scipy.io import wavfile  # ✅ gantikan librosa
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -23,17 +24,14 @@ st.write("Ucapkan atau upload suara **buka** atau **tutup**")
 mode = st.radio("Pilih Mode Input Suara:", ["Rekam Langsung 🎙", "Upload File 📁"])
 audio_ready = False
 
-# ==================== REKAM MIC (WAV PCM ASLI) ====================
+# ========== INPUT AUDIO ==========
 if mode == "Rekam Langsung 🎙":
-    st.write("🎙 Klik lalu bicara (output WAV PCM):")
-    recorded_audio = st.experimental_audio_input(" ")
-
-    if recorded_audio:
+    audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
+    if audio and "bytes" in audio:
         with open("temp_audio.wav", "wb") as f:
-            f.write(recorded_audio.getbuffer())
+            f.write(audio["bytes"])
         audio_ready = True
 
-# ==================== UPLOAD FILE WAV ====================
 else:
     uploaded_file = st.file_uploader("Upload file audio", type=["wav"])
     if uploaded_file:
@@ -41,50 +39,50 @@ else:
             f.write(uploaded_file.read())
         audio_ready = True
 
-# ==================== PROSES & PREDIKSI ====================
+# ========== PROSES & PREDIKSI ==========
 if audio_ready:
 
     st.audio("temp_audio.wav", format="audio/wav")
 
-    # ----- Baca audio WAV PCM -----
+    # ✅ Baca audio pakai scipy (tanpa librosa!)
     try:
         sr, y = wavfile.read("temp_audio.wav")
     except:
-        st.error("⚠ Format audio bukan WAV PCM! Ulangi rekam.")
+        st.error("⚠ Gagal membaca audio. Pastikan format WAV.")
         st.stop()
 
-    # Jika stereo → convert ke mono
+    # Jika stereo → convert mono
     if len(y.shape) > 1:
         y = y.mean(axis=1)
 
     y = y.astype(np.float32)
 
-    # Normanisasi volume (RMS)
+    # Normalisasi RMS volume
     rms = np.sqrt(np.mean(y**2))
     if rms > 0:
         y = y / rms * 0.1
 
-    # Resample ke 16kHz (jika perlu)
+    # Resample 16 kHz
     if sr != 16000:
         y = resample(y, int(len(y) * 16000 / sr))
 
-    # Buang silent di awal/akhir
+    # Trim silence (hapus bagian sangat kecil)
     idx = np.where(np.abs(y) > 0.02)[0]
     if len(idx) > 0:
         y = y[idx[0]:idx[-1]]
 
-    # Minimal panjang bicara
+    # Jika terlalu pendek
     if len(y) < 3000:
-        st.warning("⚠ Suara terlalu pendek, bicara lebih jelas!")
+        st.warning("⚠ Suara terlalu pendek, coba bicara lebih jelas.")
         st.stop()
 
-    # Paksa 1 detik (16000 sample)
+    # Paksa 1 detik (16000 sampel)
     if len(y) > 16000:
         y = y[:16000]
     else:
         y = np.pad(y, (0, 16000 - len(y)))
 
-    # ---- Ekstraksi Fitur MFCC 13 (sesuai training) ----
+    # Ekstraksi MFCC 13
     mf = mfcc(y, 16000, numcep=13)
     feat = np.mean(mf, axis=0).reshape(1, -1)
 
@@ -97,7 +95,7 @@ if audio_ready:
     label = le.inverse_transform([pred])[0]
     conf = max(prob) * 100
 
-    # Output UI
+    # Output
     st.subheader("🔍 Hasil Prediksi")
     st.write(f"🧾 Label      : **{label}**")
     st.write(f"📊 Confidence : **{conf:.2f}%**")
