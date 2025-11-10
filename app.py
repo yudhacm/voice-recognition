@@ -3,9 +3,9 @@ import numpy as np
 import joblib
 import streamlit as st
 from streamlit_mic_recorder import mic_recorder
-from python_speech_features import mfcc
+from python_speech_features import mfcc, delta
 from scipy.signal import resample
-from scipy.io import wavfile  # ✅ gantikan librosa
+import librosa
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -22,82 +22,80 @@ st.title("🎤 Voice Command Recognition")
 st.write("Ucapkan atau upload suara **buka** atau **tutup**")
 
 mode = st.radio("Pilih Mode Input Suara:", ["Rekam Langsung 🎙", "Upload File 📁"])
-audio_ready = False
+audio_bytes = None
 
-# ========== INPUT AUDIO ==========
 if mode == "Rekam Langsung 🎙":
     audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
     if audio and "bytes" in audio:
-        with open("temp_audio.wav", "wb") as f:
-            f.write(audio["bytes"])
-        audio_ready = True
+        audio_bytes = audio["bytes"]
 
 else:
-    uploaded_file = st.file_uploader("Upload file audio", type=["wav"])
+    uploaded_file = st.file_uploader("Upload file audio", type=["wav", "mp3", "ogg"])
     if uploaded_file:
+        audio_bytes = uploaded_file.read()
+
+if audio_bytes:
+
+    # ========== SIMPAN SEBAGAI WAV VALID ==========
+    try:
+        samples = np.frombuffer(audio_bytes, dtype=np.int16)
+
+        # stereo → mono
+        if len(samples) % 2 == 0:
+            samples = samples.reshape(-1, 2).mean(axis=1)
+
+        from scipy.io.wavfile import write
+        write("temp_audio.wav", 44100, samples.astype(np.int16))
+
+    except:
         with open("temp_audio.wav", "wb") as f:
-            f.write(uploaded_file.read())
-        audio_ready = True
+            f.write(audio_bytes)
 
-# ========== PROSES & PREDIKSI ==========
-if audio_ready:
-
+    # Putar audio
     st.audio("temp_audio.wav", format="audio/wav")
 
-    # ✅ Baca audio pakai scipy (tanpa librosa!)
-    try:
-        sr, y = wavfile.read("temp_audio.wav")
-    except:
-        st.error("⚠ Gagal membaca audio. Pastikan format WAV.")
-        st.stop()
-
-    # Jika stereo → convert mono
-    if len(y.shape) > 1:
-        y = y.mean(axis=1)
-
+    # ========== LOAD AUDIO ==========
+    y, sr = librosa.load("temp_audio.wav", sr=None)
     y = y.astype(np.float32)
 
-    # Normalisasi RMS volume
+    if len(y) == 0:
+        st.error("⚠ Audio tidak terbaca! Coba rekam ulang.")
+        st.stop()
+
+    # Normalize volume RMS
     rms = np.sqrt(np.mean(y**2))
     if rms > 0:
         y = y / rms * 0.1
 
-    # Resample 16 kHz
+    # Resample ke 16kHz
     if sr != 16000:
         y = resample(y, int(len(y) * 16000 / sr))
 
-    # Trim silence (hapus bagian sangat kecil)
+    # Trim silence
     idx = np.where(np.abs(y) > 0.02)[0]
     if len(idx) > 0:
         y = y[idx[0]:idx[-1]]
 
-    # Jika terlalu pendek
-    if len(y) < 3000:
-        st.warning("⚠ Suara terlalu pendek, coba bicara lebih jelas.")
-        st.stop()
-
-    # Paksa 1 detik (16000 sampel)
+    # Fix 1 detik
     if len(y) > 16000:
         y = y[:16000]
     else:
         y = np.pad(y, (0, 16000 - len(y)))
 
-    # Ekstraksi MFCC 13
-    mf = mfcc(y, 16000, numcep=13)
-    feat = np.mean(mf, axis=0).reshape(1, -1)
+    m = mfcc(y, 16000, numcep=13)
+    feat = np.mean(m, axis=0).reshape(1, -1)
 
-    # Scaling
     feat = scaler.transform(feat)
 
-    # Prediksi
+    # ========== PREDIKSI ==========
     prob = model.predict_proba(feat)[0]
     pred = model.predict(feat)[0]
     label = le.inverse_transform([pred])[0]
     conf = max(prob) * 100
 
-    # Output
+    # ========== TAMPILKAN HASIL ==========
     st.subheader("🔍 Hasil Prediksi")
-    st.write(f"🧾 Label      : **{label}**")
+    st.write(f"🧾 Label Terbaca : **{label}**")
     st.write(f"📊 Confidence : **{conf:.2f}%**")
 
     if conf > 55:
