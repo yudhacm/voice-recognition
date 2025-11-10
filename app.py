@@ -5,7 +5,7 @@ import streamlit as st
 from streamlit_mic_recorder import mic_recorder
 from python_speech_features import mfcc
 from scipy.signal import resample
-import librosa
+from scipy.io import wavfile  # ✅ gantikan librosa
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -22,9 +22,9 @@ st.title("🎤 Voice Command Recognition")
 st.write("Ucapkan atau upload suara **buka** atau **tutup**")
 
 mode = st.radio("Pilih Mode Input Suara:", ["Rekam Langsung 🎙", "Upload File 📁"])
-audio_ready = False  # penanda lanjut proses
+audio_ready = False
 
-# ================== AUDIO INPUT ===================
+# ========== INPUT AUDIO ==========
 if mode == "Rekam Langsung 🎙":
     audio = mic_recorder(start_prompt="🎙 Mulai Rekam", stop_prompt="⏹ Stop Rekam", just_once=True)
     if audio and "bytes" in audio:
@@ -33,66 +33,71 @@ if mode == "Rekam Langsung 🎙":
         audio_ready = True
 
 else:
-    uploaded_file = st.file_uploader("Upload file audio", type=["wav", "mp3", "ogg"])
+    uploaded_file = st.file_uploader("Upload file audio", type=["wav"])
     if uploaded_file:
         with open("temp_audio.wav", "wb") as f:
             f.write(uploaded_file.read())
         audio_ready = True
 
-# ================== PROSES AUDIO ===================
+# ========== PROSES & PREDIKSI ==========
 if audio_ready:
+
     st.audio("temp_audio.wav", format="audio/wav")
 
-    # Load audio dengan librosa
-    y, sr = librosa.load("temp_audio.wav", sr=None, mono=True)
-    y = y.astype(np.float32)
-
-    # Cek jika audio kosong
-    if len(y) == 0:
-        st.error("⚠ Audio tidak terbaca! Coba ulangi.")
+    # ✅ Baca audio pakai scipy (tanpa librosa!)
+    try:
+        sr, y = wavfile.read("temp_audio.wav")
+    except:
+        st.error("⚠ Gagal membaca audio. Pastikan format WAV.")
         st.stop()
 
-    # Normalize RMS volume
+    # Jika stereo → convert mono
+    if len(y.shape) > 1:
+        y = y.mean(axis=1)
+
+    y = y.astype(np.float32)
+
+    # Normalisasi RMS volume
     rms = np.sqrt(np.mean(y**2))
     if rms > 0:
         y = y / rms * 0.1
 
-    # Resample ke 16kHz jika perlu
+    # Resample 16 kHz
     if sr != 16000:
         y = resample(y, int(len(y) * 16000 / sr))
 
-    # Trim silence (buang depan & belakang)
+    # Trim silence (hapus bagian sangat kecil)
     idx = np.where(np.abs(y) > 0.02)[0]
     if len(idx) > 0:
         y = y[idx[0]:idx[-1]]
 
-    # Kalau audio kependekan → warning
+    # Jika terlalu pendek
     if len(y) < 3000:
         st.warning("⚠ Suara terlalu pendek, coba bicara lebih jelas.")
         st.stop()
 
-    # Fix 1 detik (16000 samples)
+    # Paksa 1 detik (16000 sampel)
     if len(y) > 16000:
         y = y[:16000]
     else:
         y = np.pad(y, (0, 16000 - len(y)))
 
     # Ekstraksi MFCC 13
-    mfcc_feat = mfcc(y, 16000, numcep=13)
-    feat = np.mean(mfcc_feat, axis=0).reshape(1, -1)
+    mf = mfcc(y, 16000, numcep=13)
+    feat = np.mean(mf, axis=0).reshape(1, -1)
 
-    # Scaling sesuai model
+    # Scaling
     feat = scaler.transform(feat)
 
-    # Prediksi model
+    # Prediksi
     prob = model.predict_proba(feat)[0]
     pred = model.predict(feat)[0]
     label = le.inverse_transform([pred])[0]
     conf = max(prob) * 100
 
-    # ================== OUTPUT ===================
+    # Output
     st.subheader("🔍 Hasil Prediksi")
-    st.write(f"🧾 Label  : **{label}**")
+    st.write(f"🧾 Label      : **{label}**")
     st.write(f"📊 Confidence : **{conf:.2f}%**")
 
     if conf > 55:
