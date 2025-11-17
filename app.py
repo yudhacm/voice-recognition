@@ -18,10 +18,10 @@ def load_model():
 
 model, scaler, le = load_model()
 
-st.title("🎤 Voice Command Recognition")
+st.title("Voice Command Recognition")
 st.write("Ucapkan atau upload suara **buka** atau **tutup**")
 
-mode = st.radio("Pilih Mode Input Suara:", ["Rekam Langsung 🎙", "Upload File 📁"])
+mode = st.radio("Pilih Mode Input Suara:", ["Rekam Langsung 🎙", "Upload File"])
 audio_bytes = None
 
 if mode == "Rekam Langsung 🎙":
