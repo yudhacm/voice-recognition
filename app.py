@@ -38,16 +38,18 @@ if audio_bytes:
 
     # ========== SIMPAN SEBAGAI WAV VALID ==========
     try:
+        # decode ke int16 untuk mic input
         samples = np.frombuffer(audio_bytes, dtype=np.int16)
 
         # stereo → mono
         if len(samples) % 2 == 0:
             samples = samples.reshape(-1, 2).mean(axis=1)
 
+        # simpan sebagai wav 44.1kHz dulu
         from scipy.io.wavfile import write
         write("temp_audio.wav", 44100, samples.astype(np.int16))
-
     except:
+        # jika upload file (sudah valid audio)
         with open("temp_audio.wav", "wb") as f:
             f.write(audio_bytes)
 
@@ -58,6 +60,7 @@ if audio_bytes:
     y, sr = librosa.load("temp_audio.wav", sr=None)
     y = y.astype(np.float32)
 
+    # jika kosong
     if len(y) == 0:
         st.error("⚠ Audio tidak terbaca! Coba rekam ulang.")
         st.stop()
@@ -93,10 +96,12 @@ if audio_bytes:
     label = le.inverse_transform([pred])[0]
     conf = max(prob) * 100
 
-    # ========== TAMPILKAN HASIL ==========
+    # ========== TAMPILKAN HASIL (PASTI MUNCUL) ==========
     st.subheader("🔍 Hasil Prediksi")
-    st.write(f"📊 Confidence : **{conf:.2f}%**")
+    st.write(f"🧾 Label Terbaca : **{label}**")
+    st.write(f"📊 Confidence   : **{conf:.2f}%**")
 
+    # Warna indikator
     if conf > 55:
         if "buka" in label.lower():
             st.success(f"✅ BUKA — {conf:.2f}%")
